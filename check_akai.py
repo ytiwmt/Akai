@@ -173,10 +173,11 @@ def run():
 
             print("🟢 Click 再診")
 
-            page.get_by_role(
-                "button",
-                name=re.compile("再診")
-            ).click()
+            page.locator(
+                '[data-id="operation-selection"]'
+            ).filter(
+                has_text="再診"
+            ).first.click()
 
             page.wait_for_timeout(2000)
 
