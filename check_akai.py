@@ -83,28 +83,44 @@ def scan_slots(page):
 
     found = []
 
-    table = page.locator("table")
+    tables = page.locator("table")
 
-    rows = table.locator("tr")
+    table_count = tables.count()
 
-    for r_idx in range(rows.count()):
+    print(f"📊 table count: {table_count}")
 
-        row = rows.nth(r_idx)
+    for t_idx in range(table_count):
+
+        table = tables.nth(t_idx)
 
         try:
 
-            text = " ".join(
-                row.inner_text().split()
-            )
+            table_text = table.inner_text()
 
-            # 日付行だけ抽出
-            if re.search(r"\d+/\d+", text):
+            # 空き記号を含むtableだけ対象
+            if not any(x in table_text for x in ["◎", "×", "－"]):
+                continue
 
-                found.append(text)
+            print(f"✅ target table: {t_idx}")
+
+            rows = table.locator("tr")
+
+            for r_idx in range(rows.count()):
+
+                row = rows.nth(r_idx)
+
+                text = " ".join(
+                    row.inner_text().split()
+                )
+
+                # 日付行だけ抽出
+                if re.search(r"\d+/\d+", text):
+
+                    found.append(text)
 
         except Exception as e:
 
-            print("row parse error:", e)
+            print("❌ table parse error:", e)
 
     return found
 
@@ -138,6 +154,10 @@ def run():
 
         try:
 
+            # =========================
+            # Open
+            # =========================
+
             print("🚀 Open page")
 
             page.goto(
@@ -158,7 +178,20 @@ def run():
                 name=re.compile("再診")
             ).click()
 
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(2000)
+
+            # =========================
+            # 予約に進む
+            # =========================
+
+            print("🟢 Click 予約に進む")
+
+            page.get_by_role(
+                "button",
+                name="予約に進む"
+            ).click()
+
+            page.wait_for_timeout(4000)
 
             # =========================
             # IPL選択
@@ -167,6 +200,21 @@ def run():
             print("🟢 Select IPL")
 
             page.get_by_text("IPL").click()
+
+            page.wait_for_timeout(2000)
+
+            # =========================
+            # メニューを確定
+            # =========================
+
+            print("🟢 Click メニューを確定する")
+
+            page.get_by_role(
+                "button",
+                name="メニューを確定する"
+            ).click()
+
+            page.wait_for_timeout(5000)
 
             # =========================
             # カレンダー待機
@@ -180,6 +228,24 @@ def run():
             page.wait_for_timeout(5000)
 
             # =========================
+            # デバッグ
+            # =========================
+
+            print("========== BODY DEBUG ==========")
+
+            try:
+
+                body_text = page.locator("body").inner_text()
+
+                print(body_text[:5000])
+
+            except Exception as e:
+
+                print("❌ body debug error:", e)
+
+            print("================================")
+
+            # =========================
             # 3週間分取得
             # =========================
 
@@ -188,6 +254,8 @@ def run():
                 print(f"📅 week {week}")
 
                 result = scan_slots(page)
+
+                print(f"found count: {len(result)}")
 
                 all_found.extend(result)
 
@@ -210,6 +278,8 @@ def run():
 
                     break
 
+                print("➡ click next week")
+
                 next_btn.click()
 
                 page.wait_for_timeout(4000)
@@ -227,6 +297,8 @@ def run():
     # =========================
 
     all_found = list(dict.fromkeys(all_found))
+
+    print(f"📦 final rows: {len(all_found)}")
 
     # =========================
     # 差分検知
@@ -292,7 +364,7 @@ def run():
     if not all_found:
 
         lines.append("")
-        lines.append("空きなし")
+        lines.append("⚠ 抽出失敗 or 空きなし")
 
     else:
 
