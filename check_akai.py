@@ -55,21 +55,26 @@ if REDIS_URL:
 
 def send_discord(message):
 
+    print("📨 sending discord")
+
     if not WEBHOOK_URL:
 
+        print("❌ WEBHOOK_URL_Akai missing")
         print(message)
 
         return
 
     try:
 
-        requests.post(
+        response = requests.post(
             WEBHOOK_URL,
             json={
                 "content": message + "\n\u200b\n"
             },
             timeout=10
         )
+
+        print(f"📨 discord status: {response.status_code}")
 
     except Exception as e:
 
@@ -97,7 +102,6 @@ def scan_slots(page):
 
             table_text = table.inner_text()
 
-            # 空き記号を含むtableだけ対象
             if not any(x in table_text for x in ["◎", "×", "－"]):
                 continue
 
@@ -113,7 +117,6 @@ def scan_slots(page):
                     row.inner_text().split()
                 )
 
-                # 日付行だけ抽出
                 if re.search(r"\d+/\d+", text):
 
                     found.append(text)
@@ -136,7 +139,6 @@ def run():
 
         browser = p.chromium.launch(
             headless=True,
-            channel="chrome",
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
@@ -168,19 +170,44 @@ def run():
 
             page.goto(
                 URL,
-                timeout=60000
+                timeout=60000,
+                wait_until="networkidle"
             )
 
-            page.wait_for_timeout(10000)
+            print("🌐 after goto")
+
+            page.wait_for_timeout(15000)
+
+            print("🌐 current url:", page.url)
 
             # =========================
-            # デバッグスクショ
+            # BODY DEBUG
+            # =========================
+
+            print("========== BODY DEBUG ==========")
+
+            try:
+
+                body_text = page.locator("body").inner_text()
+
+                print(body_text[:5000])
+
+            except Exception as e:
+
+                print("❌ body debug error:", e)
+
+            print("================================")
+
+            # =========================
+            # スクショ
             # =========================
 
             page.screenshot(
-                path="debug_before_click.png",
+                path="debug_full.png",
                 full_page=True
             )
+
+            print("📸 screenshot saved")
 
             # =========================
             # 再診
@@ -194,7 +221,32 @@ def run():
                 has_text="再診"
             ).first
 
-            print("locator count:", locator.count())
+            count = locator.count()
+
+            print("locator count:", count)
+
+            if count == 0:
+
+                print("❌ 再診ボタン見つからず")
+
+                all_buttons = page.locator("button")
+
+                btn_count = all_buttons.count()
+
+                print(f"button count: {btn_count}")
+
+                for i in range(min(btn_count, 30)):
+
+                    try:
+
+                        txt = all_buttons.nth(i).inner_text()
+
+                        print(f"[button {i}] {txt}")
+
+                    except:
+                        pass
+
+                raise Exception("再診ボタンなし")
 
             locator.click(force=True)
 
@@ -237,33 +289,13 @@ def run():
             page.wait_for_timeout(7000)
 
             # =========================
-            # デバッグ
+            # カレンダースクショ
             # =========================
 
             page.screenshot(
                 path="debug_calendar.png",
                 full_page=True
             )
-
-            print("========== BODY DEBUG ==========")
-
-            try:
-
-                body_text = page.locator("body").inner_text()
-
-                print(body_text[:5000])
-
-            except Exception as e:
-
-                print("❌ body debug error:", e)
-
-            print("================================")
-
-            # =========================
-            # カレンダー待機
-            # =========================
-
-            page.wait_for_timeout(5000)
 
             # =========================
             # 3週間分取得
@@ -279,7 +311,6 @@ def run():
 
                 all_found.extend(result)
 
-                # 最後の週は押さない
                 if week == 2:
                     break
 
@@ -322,7 +353,7 @@ def run():
             browser.close()
 
     # =========================
-    # 重複除去（順番維持）
+    # 重複除去
     # =========================
 
     all_found = list(dict.fromkeys(all_found))
@@ -421,7 +452,7 @@ def run():
     send_discord(message)
 
     print("✅ done")
-
+    
 # =========================
 # 実行
 # =========================
