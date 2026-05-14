@@ -1,5 +1,4 @@
 import os
-import json
 import requests
 import redis
 from playwright.sync_api import sync_playwright
@@ -8,7 +7,6 @@ URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475/
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL_Akai")
 REDIS_URL = os.environ.get("REDIS_URL_Akai")
-REDIS_KEY = "akai_status_v6"
 
 # -------------------------
 # redis
@@ -30,25 +28,9 @@ def send(msg):
         print(msg)
 
 # -------------------------
-# 安定待ち（完全分離）
+# click
 # -------------------------
-def wait_ready(page):
-    # ① DOMロード
-    page.wait_for_load_state("domcontentloaded")
-
-    # ② 再診 or 予約 or IPL のいずれかが出るまで待つ
-    page.wait_for_function("""
-        () => {
-            return document.querySelector("[data-id='operation-selection']")
-                || document.body.innerText.includes("予約に進む")
-                || document.body.innerText.includes("IPL");
-        }
-    """, timeout=30000)
-
-# -------------------------
-# click helper
-# -------------------------
-def click(page, selector, name, wait=1500):
+def click(page, selector, name, wait=1200):
     loc = page.locator(selector)
     print(f"🔎 {name} count:", loc.count())
 
@@ -94,18 +76,22 @@ def run():
 
     with sync_playwright() as p:
 
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox"]
+        )
         page = browser.new_page()
 
         try:
-            print("🚀 v1.6.3 start")
+            print("🚀 v1.6.4 start")
 
             # -------------------------
             # open
             # -------------------------
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
 
-            wait_ready(page)
+            # ★重要：待たない、存在だけ確認
+            page.wait_for_selector("[data-id='operation-selection']", timeout=30000)
 
             # -------------------------
             # 再診
@@ -113,7 +99,7 @@ def run():
             click(page, "[data-id='operation-selection']", "再診")
 
             # -------------------------
-            # 予約に進む
+            # 予約
             # -------------------------
             click(page, "text=予約に進む", "予約")
 
@@ -123,7 +109,7 @@ def run():
             click(page, "text=当日施術のみ", "カテゴリ")
 
             # -------------------------
-            # IPL（label固定）
+            # IPL（labelクリック）
             # -------------------------
             ipl = page.locator("text=IPL")
             print("🔎 IPL count:", ipl.count())
@@ -139,17 +125,23 @@ def run():
             # -------------------------
             # 確定
             # -------------------------
-            click(page, "button:has-text('メニューを確定する')", "確定", 3000)
+            click(page, "button:has-text('メニューを確定する')", "確定", 2500)
 
             # -------------------------
-            # カレンダー待機（CSSのみ）
+            # カレンダー（待たない・存在確認のみ）
             # -------------------------
-            page.wait_for_selector("button:has-text('翌週')", timeout=30000)
+            page.wait_for_timeout(2000)
+
+            if not has_calendar(page):
+                print("❌ calendar not found")
+                page.screenshot(path="no_calendar.png", full_page=True)
+                send("🟡 calendar not found")
+                return
 
             print("🟢 calendar ready")
 
             # -------------------------
-            # scan 3 weeks
+            # scan
             # -------------------------
             for w in range(3):
 
@@ -167,7 +159,7 @@ def run():
                     break
 
                 next_btn.first.click(force=True)
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(1500)
 
         finally:
             browser.close()
@@ -175,7 +167,7 @@ def run():
     all_found = list(dict.fromkeys(all_found))
     print("\nFINAL:", all_found)
 
-    send("🟢 Akai v1.6.3\n" + str(all_found))
+    send("🟢 Akai v1.6.4\n" + str(all_found))
 
 if __name__ == "__main__":
     run()
