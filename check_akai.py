@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 # 設定
 # =========================
 
-URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475/reservations/new?menu_entrance_id=984c91f4-067b-4bc8-ac8c-861024818292"
+URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475"
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL_Akai")
 REDIS_URL = os.environ.get("REDIS_URL_Akai")
@@ -210,6 +210,29 @@ def run():
             print("📸 screenshot saved")
 
             # =========================
+            # IPL を探す
+            # =========================
+
+            print("🟢 Find IPL")
+
+            all_buttons = page.locator("button")
+
+            btn_count = all_buttons.count()
+
+            print(f"button count: {btn_count}")
+
+            for i in range(min(btn_count, 50)):
+
+                try:
+
+                    txt = all_buttons.nth(i).inner_text()
+
+                    print(f"[button {i}] {txt}")
+
+                except:
+                    pass
+
+            # =========================
             # 再診
             # =========================
 
@@ -226,26 +249,6 @@ def run():
             print("locator count:", count)
 
             if count == 0:
-
-                print("❌ 再診ボタン見つからず")
-
-                all_buttons = page.locator("button")
-
-                btn_count = all_buttons.count()
-
-                print(f"button count: {btn_count}")
-
-                for i in range(min(btn_count, 30)):
-
-                    try:
-
-                        txt = all_buttons.nth(i).inner_text()
-
-                        print(f"[button {i}] {txt}")
-
-                    except:
-                        pass
-
                 raise Exception("再診ボタンなし")
 
             locator.click(force=True)
@@ -258,10 +261,14 @@ def run():
 
             print("🟢 Click 予約に進む")
 
-            page.get_by_role(
+            reserve_btn = page.get_by_role(
                 "button",
-                name="予約に進む"
-            ).click(force=True)
+                name=re.compile("予約")
+            )
+
+            print("reserve btn count:", reserve_btn.count())
+
+            reserve_btn.first.click(force=True)
 
             page.wait_for_timeout(5000)
 
@@ -281,10 +288,14 @@ def run():
 
             print("🟢 Click メニューを確定する")
 
-            page.get_by_role(
+            confirm_btn = page.get_by_role(
                 "button",
-                name="メニューを確定する"
-            ).click(force=True)
+                name=re.compile("確定")
+            )
+
+            print("confirm btn count:", confirm_btn.count())
+
+            confirm_btn.first.click(force=True)
 
             page.wait_for_timeout(7000)
 
@@ -296,6 +307,24 @@ def run():
                 path="debug_calendar.png",
                 full_page=True
             )
+
+            # =========================
+            # CALENDAR DEBUG
+            # =========================
+
+            print("========== CALENDAR DEBUG ==========")
+
+            try:
+
+                body_text = page.locator("body").inner_text()
+
+                print(body_text[:5000])
+
+            except Exception as e:
+
+                print("❌ calendar debug error:", e)
+
+            print("====================================")
 
             # =========================
             # 3週間分取得
@@ -452,7 +481,7 @@ def run():
     send_discord(message)
 
     print("✅ done")
-    
+
 # =========================
 # 実行
 # =========================
