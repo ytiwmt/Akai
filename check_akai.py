@@ -10,6 +10,7 @@ URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475"
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL_Akai")
 REDIS_URL = os.environ.get("REDIS_URL_Akai")
 
+
 # -------------------------
 # redis
 # -------------------------
@@ -51,64 +52,74 @@ def detect_state(page):
 # -------------------------
 # safe click
 # -------------------------
-def safe_click(locator, label=""):
-    try:
-        if locator.count() == 0:
-            print(f"🟡 not found: {label}")
-            return False
+def click_safe(page, selector, label):
+    loc = page.locator(selector)
+    if loc.count() == 0:
+        print(f"🟡 not found: {label}")
+        return False
 
-        locator.first.click(timeout=5000, force=True)
+    try:
+        loc.first.click(timeout=5000, force=True)
         print(f"🟢 clicked: {label}")
         return True
-
     except Exception as e:
         print(f"❌ click failed {label}: {e}")
         return False
 
 
 # -------------------------
-# date picker (fixed)
+# wait calendar ready
+# -------------------------
+def wait_calendar_ready(page):
+
+    # DOM再描画待ち（ここが核心）
+    for _ in range(10):
+        if page.locator("input[aria-label*='Choose date']").count() > 0:
+            return True
+        page.wait_for_timeout(500)
+
+    return False
+
+
+# -------------------------
+# date select
 # -------------------------
 def select_date_with_ok(page, date_str):
 
     print(f"📅 selecting: {date_str}")
 
-    # ① open picker（ここが重要）
-    picker = page.locator("input[aria-label*='Choose date']").first
-
-    if picker.count() == 0:
-        print("❌ date picker not found")
+    if not wait_calendar_ready(page):
+        print("❌ calendar not ready")
         return False
 
+    # open picker
+    picker = page.locator("input[aria-label*='Choose date']").first
+
     try:
-        picker.click(timeout=5000, force=True)
+        picker.click(force=True, timeout=5000)
     except:
-        print("⚠️ picker click fallback")
+        print("⚠️ picker fallback click")
         page.locator("input").first.click(force=True)
 
     page.wait_for_timeout(800)
 
-    # ② wait popup
-    page.wait_for_timeout(800)
-
-    # ③ select date
+    # select date
     target = page.locator(f"text={date_str}")
 
     if target.count() == 0:
-        print(f"🟡 date not found: {date_str}")
+        print("🟡 date not found")
         return False
 
     target.first.click()
     print("🟢 date selected")
 
-    # ④ OK
+    # OK
     ok = page.locator("button:has-text('OK')")
 
     if ok.count() > 0:
         ok.first.click()
         print("🟢 OK clicked")
 
-    # ⑤ render wait
     page.wait_for_timeout(2000)
 
     return True
@@ -153,7 +164,7 @@ def run():
         page = browser.new_page()
 
         try:
-            print("🚀 v1.8.1 start")
+            print("🚀 v1.8.2 start")
 
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(2000)
@@ -162,22 +173,22 @@ def run():
             print("🧭 state:", state)
 
             # -------------------------
-            # step flow
+            # flow
             # -------------------------
             if state == "start":
-                safe_click(page.locator("[data-id='operation-selection']"), "再診")
-                safe_click(page.locator("text=予約に進む"), "予約")
+                click_safe(page, "[data-id='operation-selection']", "再診")
+                click_safe(page, "text=予約に進む", "予約")
 
             elif state == "reserve":
-                safe_click(page.locator("text=予約に進む"), "予約")
+                click_safe(page, "text=予約に進む", "予約")
 
-            if page.locator("text=メニューを確定する").count() > 0:
-                safe_click(page.locator("button:has-text('メニューを確定する')"), "メニュー確定")
+            # menu confirm（ここ重要）
+            click_safe(page, "button:has-text('メニューを確定する')", "メニュー確定")
 
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(2000)
 
             # -------------------------
-            # calendar loop
+            # calendar scan
             # -------------------------
             for d in targets:
 
@@ -188,19 +199,18 @@ def run():
                     continue
 
                 found = scan(page)
+                all_found.extend(found)
 
                 print("slot:", found)
 
-                all_found.extend(found)
-
             # -------------------------
-            # final
+            # result
             # -------------------------
             all_found = list(dict.fromkeys(all_found))
 
             print("\nFINAL:", all_found)
 
-            send("🟢 Akai v1.8.1\n" + str(all_found))
+            send("🟢 Akai v1.8.2\n" + str(all_found))
 
         finally:
             browser.close()
