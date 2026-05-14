@@ -1,6 +1,7 @@
 # =========================================================
-# Akai IPL Monitor v1.5.0
-# Fix: MUI radio state + deterministic navigation
+# Akai IPL Monitor v1.6.0
+# Fix: MUI radio (label-driven UI)
+# Stable navigation + calendar detection
 # =========================================================
 
 import os
@@ -11,7 +12,7 @@ import redis
 from playwright.sync_api import sync_playwright
 
 # =========================
-# Config
+# config
 # =========================
 
 URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475/reservations/new?menu_entrance_id=984c91f4-067b-4bc8-ac8c-861024818292"
@@ -19,10 +20,10 @@ URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475/
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL_Akai")
 REDIS_URL = os.environ.get("REDIS_URL_Akai")
 
-REDIS_KEY = "akai_status_v5"
+REDIS_KEY = "akai_status_v6"
 
 # =========================
-# Redis
+# redis
 # =========================
 
 r = None
@@ -44,10 +45,13 @@ def send(msg):
     if not WEBHOOK_URL:
         print(msg)
         return
-    requests.post(WEBHOOK_URL, json={"content": msg + "\n\u200b\n"}, timeout=10)
+    try:
+        requests.post(WEBHOOK_URL, json={"content": msg + "\n\u200b\n"}, timeout=10)
+    except Exception as e:
+        print("Discord error:", e)
 
 # =========================
-# utils
+# click helper
 # =========================
 
 def click(page, selector, name, wait=2000):
@@ -68,7 +72,7 @@ def click(page, selector, name, wait=2000):
         return False
 
 # =========================
-# calendar detection
+# calendar detect
 # =========================
 
 def is_calendar(page):
@@ -103,12 +107,16 @@ def run():
 
     with sync_playwright() as p:
 
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox"]
+        )
+
         page = browser.new_page()
 
         try:
 
-            print("🚀 v1.5.0 start")
+            print("🚀 v1.6.0 start")
 
             # =========================
             # open
@@ -117,48 +125,50 @@ def run():
             page.wait_for_timeout(4000)
 
             # =========================
-            # step 1: 再診
+            # 再診
             # =========================
             click(page, "[data-id='operation-selection']", "再診", 2000)
 
             # =========================
-            # step 2: 予約
+            # 予約に進む
             # =========================
-            click(page, "text=予約に進む", "予約に進む", 3000)
+            click(page, "text=予約に進む", "予約", 3000)
 
             # =========================
-            # step 3: カテゴリ（ある場合）
+            # カテゴリ（存在時のみ）
             # =========================
             click(page, "text=当日施術のみ", "カテゴリ", 1500)
 
             # =========================
-            # step 4: IPL (重要: radio state)
+            # IPL（重要：radio禁止・labelクリック）
             # =========================
-            ipl_radio = page.locator("input[data-id='menu-selection']")
 
-            print("🔎 IPL radio count:", ipl_radio.count())
+            ipl_label = page.locator("text=IPL")
 
-            if ipl_radio.count() > 0:
-                ipl_radio.first.check(force=True)
-                print("🟢 IPL radio checked")
-            else:
-                print("❌ IPL radio not found")
+            print("🔎 IPL label count:", ipl_label.count())
+
+            if ipl_label.count() == 0:
+                print("❌ IPL not found")
+                page.screenshot(path="no_ipl.png", full_page=True)
                 return
+
+            ipl_label.first.click(force=True)
+            print("🟢 IPL selected (label click)")
 
             page.wait_for_timeout(1500)
 
             # =========================
-            # step 5: 確定
+            # メニュー確定
             # =========================
-            click(page, "button:has-text('メニューを確定する')", "メニュー確定", 4000)
+            click(page, "button:has-text('メニューを確定する')", "確定", 4000)
 
             # =========================
-            # debug snapshot
+            # debug
             # =========================
             print("\n========== AFTER CONFIRM ==========")
             print("URL:", page.url)
 
-            page.wait_for_timeout(4000)
+            page.wait_for_timeout(3000)
 
             # =========================
             # calendar check
@@ -225,7 +235,7 @@ def run():
     # notify
     # =========================
 
-    msg = ["🟢 Akai IPL監視 v1.5.0"]
+    msg = ["🟢 Akai IPL監視 v1.6.0"]
 
     if not changed:
         msg.append("（前回から変更なし）")
