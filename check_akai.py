@@ -1,10 +1,9 @@
 # =========================================================
 # Akai IPL Monitoring Script
-# Version: v1.2.0 (State-driven flow / adaptive navigation)
+# Version: v1.3.0 (DOM resilient + robust selectors)
 # =========================================================
 
 import os
-import re
 import json
 import time
 import requests
@@ -21,27 +20,19 @@ URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475/
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL_Akai")
 REDIS_URL = os.environ.get("REDIS_URL_Akai")
 
-REDIS_KEY = "akai_status"
+REDIS_KEY = "akai_status_v3"
 
 # =========================
 # Redis
 # =========================
 
 r = None
-
 if REDIS_URL:
     try:
-        url = REDIS_URL.replace("redis://", "rediss://", 1) if REDIS_URL.startswith("redis://") else REDIS_URL
-
-        r = redis.from_url(
-            url,
-            decode_responses=True,
-            ssl_cert_reqs=None
-        )
-
+        url = REDIS_URL.replace("redis://", "rediss://", 1)
+        r = redis.from_url(url, decode_responses=True, ssl_cert_reqs=None)
         r.ping()
         print("✅ Redis connected")
-
     except Exception as e:
         print("❌ Redis error:", e)
         r = None
@@ -54,42 +45,75 @@ def send_discord(msg):
     if not WEBHOOK_URL:
         print(msg)
         return
-
     try:
         requests.post(WEBHOOK_URL, json={"content": msg + "\n\u200b\n"}, timeout=10)
     except Exception as e:
         print("Discord error:", e)
 
 # =========================
-# Scan
+# Safe click helper
+# =========================
+
+def safe_click(page, locator, label, wait=2000):
+    try:
+        if locator.count() > 0:
+            locator.first.click(force=True)
+            print(f"🟢 {label}")
+            page.wait_for_timeout(wait)
+            return True
+        else:
+            print(f"🟡 {label}なし")
+            return False
+    except Exception as e:
+        print(f"❌ {label}失敗:", e)
+        return False
+
+# =========================
+# slot scan (完全安全版)
 # =========================
 
 def scan_slots(page):
     found = []
-    elems = page.locator("text=◎, text=△")
 
-    for i in range(elems.count()):
+    # DOM全体から抽出（MUI対策）
+    blocks = page.locator("div, span, td")
+
+    count = blocks.count()
+
+    for i in range(count):
         try:
-            found.append(elems.nth(i).inner_text().strip())
+            txt = blocks.nth(i).inner_text().strip()
+            if txt in ["◎", "△"]:
+                found.append(txt)
         except:
             pass
 
     return found
 
 # =========================
-# Next week
+# next week click（最強版）
 # =========================
 
-def click_next(page):
-    btn = page.locator("button:has-text('翌週')").first
+def click_next_week(page):
+    selectors = [
+        "button:has-text('翌週')",
+        "text=翌週",
+        "role=button[name='翌週']"
+    ]
 
-    if btn.count() == 0:
-        print("⛔ 翌週なし")
-        return False
+    for sel in selectors:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() > 0:
+                loc.click(force=True)
+                print("🟢 翌週クリック")
+                page.wait_for_timeout(3000)
+                return True
+        except:
+            continue
 
-    btn.click(force=True)
-    page.wait_for_timeout(3000)
-    return True
+    print("⛔ 翌週なし")
+    return False
 
 # =========================
 # main
@@ -110,58 +134,54 @@ def run():
 
         try:
 
-            print("🚀 open v1.2.0")
+            print("🚀 v1.3.0 start")
 
             # =========================
             # open
             # =========================
-            page.goto(URL, timeout=60000, wait_until="domcontentloaded")
+            page.goto(URL, timeout=60000)
             page.wait_for_timeout(5000)
 
             print("URL:", page.url)
 
             # =========================
-            # 再診（あれば押す・なければスキップ）
+            # 再診（存在すれば押す）
             # =========================
-            revisit = page.locator("[data-id='operation-selection']")
-
-            if revisit.count() > 0:
-                print("🟢 再診クリック")
-                revisit.first.click(force=True)
-                page.wait_for_timeout(3000)
-            else:
-                print("🟡 再診スキップ（既にステップ進行済み）")
+            safe_click(
+                page,
+                page.locator("[data-id='operation-selection']"),
+                "再診",
+                wait=3000
+            )
 
             # =========================
-            # 予約に進む（存在すれば）
+            # 予約
             # =========================
-            reserve_btn = page.locator("text=予約")
-
-            if reserve_btn.count() > 0:
-                print("🟢 予約に進む")
-                reserve_btn.first.click(force=True)
-                page.wait_for_timeout(5000)
-
-            # =========================
-            # カテゴリ（存在チェック型）
-            # =========================
-            cat = page.locator("text=当日施術のみ")
-
-            if cat.count() > 0:
-                print("🟢 カテゴリ展開")
-                cat.first.click(force=True)
-                page.wait_for_timeout(2000)
-            else:
-                print("🟡 カテゴリなし")
+            safe_click(
+                page,
+                page.locator("text=予約"),
+                "予約に進む",
+                wait=4000
+            )
 
             # =========================
-            # IPL
+            # カテゴリ
             # =========================
-            ipl = page.locator("text=IPL")
+            safe_click(
+                page,
+                page.locator("text=当日施術のみ"),
+                "カテゴリ",
+                wait=2000
+            )
 
-            if ipl.count() > 0:
-                print("🟢 IPL選択")
-                ipl.first.click(force=True)
+            # =========================
+            # IPL（麻酔なし優先）
+            # =========================
+            ipl_candidates = page.locator("text=IPL")
+
+            if ipl_candidates.count() > 0:
+                ipl_candidates.first.click(force=True)
+                print("🟢 IPL")
                 page.wait_for_timeout(2000)
             else:
                 print("❌ IPLなし")
@@ -170,26 +190,26 @@ def run():
             # =========================
             # 確定
             # =========================
-            confirm = page.locator("text=確定")
-
-            if confirm.count() > 0:
-                print("🟢 確定")
-                confirm.first.click(force=True)
-            else:
-                print("❌ 確定ボタンなし")
-                return
-
-            page.wait_for_timeout(6000)
-
-            # カレンダー判定
-            if page.locator("button:has-text('翌週')").count() == 0:
-                print("❌ カレンダー未表示")
-                return
-
-            print("📅 カレンダーOK")
+            safe_click(
+                page,
+                page.locator("text=確定"),
+                "確定",
+                wait=6000
+            )
 
             # =========================
-            # 3週スキャン
+            # カレンダー判定（重要）
+            # =========================
+            page.wait_for_timeout(3000)
+
+            if page.locator("button").count() == 0:
+                print("❌ UI未ロード")
+                return
+
+            print("📅 カレンダー検出")
+
+            # =========================
+            # scan 3 weeks
             # =========================
             for w in range(3):
 
@@ -200,7 +220,7 @@ def run():
                 if w == 2:
                     break
 
-                if not click_next(page):
+                if not click_next_week(page):
                     break
 
         except Exception as e:
@@ -222,16 +242,15 @@ def run():
     # diff
     # =========================
 
-    is_changed = True
+    changed = True
 
     if r:
         try:
             last = r.get(REDIS_KEY)
-
             if last:
                 old = json.loads(last)
                 if set(old) == set(all_found):
-                    is_changed = False
+                    changed = False
 
             r.set(REDIS_KEY, json.dumps(all_found))
 
@@ -242,9 +261,9 @@ def run():
     # notify
     # =========================
 
-    msg = [f"🟢 Akai IPL監視 v1.2.0"]
+    msg = ["🟢 Akai IPL監視 v1.3.0"]
 
-    if not is_changed:
+    if not changed:
         msg.append("（前回から変更なし）")
 
     if not all_found:
