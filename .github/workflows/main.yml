@@ -2,8 +2,10 @@ name: Akai IPL Check
 
 on:
   schedule:
-    - cron: "0 * * * *"   # 1時間ごと
+    - cron: "0 * * * *"
+
   workflow_dispatch:
+
   push:
     paths:
       - "check_akai.py"
@@ -33,7 +35,7 @@ jobs:
           python-version: "3.11"
 
       # =========================
-      # Install
+      # Install packages
       # =========================
 
       - name: Install packages
@@ -41,15 +43,15 @@ jobs:
           pip install playwright requests redis
 
       # =========================
-      # Playwright
+      # Install Playwright Browsers
       # =========================
 
-      - name: Install Chromium
+      - name: Install Playwright Browsers
         run: |
-          playwright install chrome
+          playwright install --with-deps chromium
 
       # =========================
-      # Run
+      # Run script
       # =========================
 
       - name: Run script
@@ -60,7 +62,7 @@ jobs:
           python check_akai.py
 
       # =========================
-      # Debug Artifact
+      # Upload Debug Images
       # =========================
 
       - name: Upload Debug Images
