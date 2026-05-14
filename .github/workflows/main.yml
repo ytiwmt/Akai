@@ -18,14 +18,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Playwright
+      - name: Install Dependencies
         run: |
-          pip install playwright requests redis jpholiday
+          pip install playwright requests redis
           playwright install chromium
 
       - name: Run Checker
         env:
           WEBHOOK_URL_Akai: ${{ secrets.WEBHOOK_URL_Akai }}
-          REDIS_URL: ${{ secrets.REDIS_URL }}
+          REDIS_URL_Akai: ${{ secrets.REDIS_URL_Akai }}
         run: |
           python check_akai.py
