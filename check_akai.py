@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import requests
 import redis
 
@@ -49,52 +50,69 @@ if REDIS_URL:
 # =========================
 
 def send_discord(message):
-    print("📨 sending discord")
-
     if not WEBHOOK_URL:
-        print("❌ WEBHOOK_URL_Akai missing")
         print(message)
         return
 
     try:
-        res = requests.post(
+        requests.post(
             WEBHOOK_URL,
             json={"content": message + "\n\u200b\n"},
             timeout=10
         )
-        print("📨 discord status:", res.status_code)
-
     except Exception as e:
-        print("❌ Discord error:", e)
+        print("Discord error:", e)
 
 # =========================
-# スキャン
+# ◎抽出（DOMベース）
 # =========================
 
 def scan_slots(page):
+
     found = []
 
-    tables = page.locator("table")
-    for t in range(tables.count()):
-        table = tables.nth(t)
+    # ◎ or △ のみ拾う（table完全廃止）
+    items = page.locator("text=◎, text=△")
 
+    count = items.count()
+    print("slot count:", count)
+
+    for i in range(count):
         try:
-            txt = table.inner_text()
-            if not any(x in txt for x in ["◎", "×", "－"]):
-                continue
-
-            rows = table.locator("tr")
-
-            for i in range(rows.count()):
-                row_txt = rows.nth(i).inner_text().strip()
-
-                if re.search(r"\d+/\d+", row_txt):
-                    found.append(row_txt)
-
+            txt = items.nth(i).inner_text().strip()
+            found.append(txt)
         except:
             pass
 
     return found
+
+# =========================
+# 翌週クリック（安定版）
+# =========================
+
+def click_next_week(page):
+
+    btn = page.locator("button:has-text('翌週')").first
+
+    print("next btn count:", btn.count())
+
+    if btn.count() == 0:
+        return False
+
+    before_url = page.url
+
+    btn.scroll_into_view_if_needed()
+    btn.click(force=True)
+
+    # 重要：URL or DOM変化待ち
+    for _ in range(10):
+        time.sleep(1)
+        if page.url != before_url:
+            break
+
+    page.wait_for_timeout(4000)
+
+    return True
 
 # =========================
 # メイン
@@ -108,40 +126,28 @@ def run():
 
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
+            args=["--no-sandbox"]
         )
 
-        context = browser.new_context(
-            viewport={"width": 1400, "height": 1100},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            )
-        )
-
-        page = context.new_page()
+        page = browser.new_page()
 
         try:
-
-            # =========================
-            # Open
-            # =========================
 
             print("🚀 Open page")
 
             page.goto(URL, timeout=60000, wait_until="networkidle")
 
-            page.wait_for_timeout(8000)
+            page.wait_for_timeout(6000)
 
             # =========================
             # 再診
             # =========================
 
-            print("🟢 再診クリック")
+            print("🟢 再診")
 
             page.locator(
-                '[data-id="operation-selection"]',
+                '[data-id="operation-selection"]'
+            ).filter(
                 has_text="再診"
             ).click(force=True)
 
@@ -153,26 +159,21 @@ def run():
 
             print("🟢 予約に進む")
 
-            page.get_by_role(
-                "button",
-                name=re.compile("予約")
-            ).click(force=True)
+            page.get_by_role("button", name=re.compile("予約")).click(force=True)
 
             page.wait_for_timeout(5000)
 
             # =========================
-            # IPL（麻酔なし）選択
+            # IPL（麻酔なし）
             # =========================
 
             print("🟢 IPL選択")
 
-            ipl = page.locator("label").filter(
+            page.locator("label").filter(
                 has_text="IPL"
             ).filter(
                 has_not=page.get_by_text("麻酔あり")
-            ).first
-
-            ipl.click(force=True)
+            ).first.click(force=True)
 
             page.wait_for_timeout(3000)
 
@@ -182,47 +183,31 @@ def run():
 
             print("🟢 メニュー確定")
 
-            page.get_by_role(
-                "button",
-                name=re.compile("確定")
-            ).click(force=True)
+            page.get_by_role("button", name=re.compile("確定")).click(force=True)
 
             page.wait_for_timeout(7000)
 
             # =========================
-            # カレンダー
-            # =========================
-
-            print("📅 カレンダー取得")
-
-            page.screenshot(path="calendar.png", full_page=True)
-
-            # =========================
-            # 3週間
+            # 3週間取得
             # =========================
 
             for w in range(3):
 
                 print(f"week {w}")
 
-                result = scan_slots(page)
-
-                all_found.extend(result)
+                found = scan_slots(page)
+                all_found.extend(found)
 
                 if w == 2:
                     break
 
-                next_btn = page.get_by_role("button", name="翌週")
+                ok = click_next_week(page)
 
-                if next_btn.count() == 0:
+                if not ok:
+                    print("⛔ 翌週ボタンなし")
                     break
 
-                next_btn.click(force=True)
-
-                page.wait_for_timeout(4000)
-
         except Exception as e:
-
             print("❌ Error:", e)
 
             try:
@@ -273,12 +258,15 @@ def run():
 
     if not all_found:
         lines.append("")
-        lines.append("空きなし or 取得失敗")
+        lines.append("空きなし")
 
     else:
         lines.append("")
         for x in all_found:
-            lines.append("・" + x)
+            if "◎" in x:
+                lines.append("🚨 " + x)
+            else:
+                lines.append("・" + x)
 
     send_discord("\n".join(lines))
 
