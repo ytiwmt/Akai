@@ -26,11 +26,7 @@ r = None
 
 if REDIS_URL:
     try:
-        url = (
-            REDIS_URL.replace("redis://", "rediss://", 1)
-            if REDIS_URL.startswith("redis://")
-            else REDIS_URL
-        )
+        url = REDIS_URL.replace("redis://", "rediss://", 1) if REDIS_URL.startswith("redis://") else REDIS_URL
 
         r = redis.from_url(
             url,
@@ -55,105 +51,16 @@ def send_discord(msg):
         return
 
     try:
-        requests.post(
-            WEBHOOK_URL,
-            json={"content": msg + "\n\u200b\n"},
-            timeout=10
-        )
+        requests.post(WEBHOOK_URL, json={"content": msg + "\n\u200b\n"}, timeout=10)
     except Exception as e:
         print("Discord error:", e)
-
-# =========================
-# カレンダー出現待ち
-# =========================
-
-def wait_calendar(page):
-
-    for _ in range(15):
-
-        if page.locator("text=翌週").count() > 0:
-            print("📅 カレンダー表示確認")
-            return True
-
-        time.sleep(1)
-
-    return False
-
-# =========================
-# カテゴリ展開
-# =========================
-
-def open_category(page):
-
-    print("🟢 カテゴリ展開")
-
-    page.get_by_text(
-        "当日施術のみ",
-        exact=False
-    ).click(force=True)
-
-    page.wait_for_timeout(2000)
-
-# =========================
-# IPL選択
-# =========================
-
-def select_ipl(page):
-
-    print("🟢 IPL選択")
-
-    page.locator("label").filter(
-        has_text="IPL"
-    ).first.click(force=True)
-
-    page.wait_for_timeout(1000)
-
-# =========================
-# 確定
-# =========================
-
-def confirm_menu(page):
-
-    print("🟢 メニュー確定")
-
-    btn = page.get_by_role(
-        "button",
-        name=re.compile("確定")
-    )
-
-    btn.first.click(force=True)
-
-    page.wait_for_timeout(7000)
-
-    return wait_calendar(page)
-
-# =========================
-# 翌週
-# =========================
-
-def click_next(page):
-
-    btn = page.locator("button:has-text('翌週')").first
-
-    if btn.count() == 0:
-        print("⛔ 翌週なし")
-        return False
-
-    btn.scroll_into_view_if_needed()
-    btn.click(force=True)
-
-    time.sleep(4)
-
-    return True
 
 # =========================
 # ◎取得
 # =========================
 
-def scan(page):
-
+def scan_slots(page):
     found = []
-
     elems = page.locator("text=◎, text=△")
 
     for i in range(elems.count()):
@@ -165,6 +72,21 @@ def scan(page):
     return found
 
 # =========================
+# 翌週
+# =========================
+
+def click_next(page):
+    btn = page.locator("button:has-text('翌週')").first
+
+    if btn.count() == 0:
+        print("⛔ 翌週なし")
+        return False
+
+    btn.click(force=True)
+    page.wait_for_timeout(4000)
+    return True
+
+# =========================
 # メイン
 # =========================
 
@@ -174,71 +96,63 @@ def run():
 
     with sync_playwright() as p:
 
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox"]
-        )
-
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
 
         try:
 
             print("🚀 open")
-
-            page.goto(URL, timeout=60000, wait_until="networkidle")
-
+            page.goto(URL, timeout=60000)
             page.wait_for_timeout(5000)
 
             # =========================
-            # 再診
+            # 再診（ここは最重要・最小）
             # =========================
+            print("🟢 再診")
 
-            page.locator('[data-id="operation-selection"]') \
-                .filter(has_text="再診") \
-                .click(force=True)
-
+            page.locator("[data-id='operation-selection']").first.click(force=True)
             page.wait_for_timeout(2000)
 
             # =========================
             # 予約に進む
             # =========================
+            print("🟢 予約に進む")
 
-            page.get_by_role("button", name=re.compile("予約")) \
-                .click(force=True)
-
+            page.get_by_role("button", name=re.compile("予約")).first.click(force=True)
             page.wait_for_timeout(5000)
 
             # =========================
-            # ★重要：カテゴリ展開
+            # カテゴリ展開（重要）
             # =========================
+            print("🟢 カテゴリ展開")
 
-            open_category(page)
-
-            # =========================
-            # IPL
-            # =========================
-
-            select_ipl(page)
+            page.get_by_text("当日施術のみ").first.click(force=True)
+            page.wait_for_timeout(2000)
 
             # =========================
-            # 確定
+            # IPL選択
             # =========================
+            print("🟢 IPL")
 
-            ok = confirm_menu(page)
-
-            if not ok:
-                print("❌ カレンダー未到達")
-                return
+            page.locator("label").filter(has_text="IPL").first.click(force=True)
+            page.wait_for_timeout(2000)
 
             # =========================
-            # 3週間取得
+            # メニュー確定
             # =========================
+            print("🟢 確定")
 
+            page.get_by_role("button", name=re.compile("確定")).first.click(force=True)
+            page.wait_for_timeout(7000)
+
+            # =========================
+            # カレンダー確認
+            # =========================
             for w in range(3):
 
                 print(f"week {w}")
 
-                all_found.extend(scan(page))
+                all_found.extend(scan_slots(page))
 
                 if w == 2:
                     break
@@ -247,13 +161,8 @@ def run():
                     break
 
         except Exception as e:
-
             print("❌ Error:", e)
-
-            try:
-                page.screenshot(path="error.png", full_page=True)
-            except:
-                pass
+            page.screenshot(path="error.png", full_page=True)
 
         finally:
             browser.close()
@@ -273,7 +182,6 @@ def run():
     is_changed = True
 
     if r:
-
         try:
             last = r.get(REDIS_KEY)
 
@@ -288,7 +196,7 @@ def run():
             print("❌ Redis error:", e)
 
     # =========================
-    # メッセージ
+    # 通知
     # =========================
 
     msg = ["🟢 Akai IPL監視"]
@@ -297,8 +205,7 @@ def run():
         msg.append("（前回から変更なし）")
 
     if not all_found:
-        msg.append("")
-        msg.append("空きなし")
+        msg.append("\n空きなし")
 
     else:
         msg.append("")
