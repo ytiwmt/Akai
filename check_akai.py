@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import requests
@@ -125,7 +126,15 @@ def run():
             ]
         )
 
-        page = browser.new_page()
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            )
+        )
+
+        page = context.new_page()
 
         try:
 
@@ -136,7 +145,7 @@ def run():
                 timeout=60000
             )
 
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(7000)
 
             # =========================
             # 再診
@@ -144,12 +153,12 @@ def run():
 
             print("🟢 Click 再診")
 
-            page.locator(
-                '[data-id="operation-selection"]',
-                has_text="再診"
+            page.get_by_role(
+                "button",
+                name=re.compile("再診")
             ).click()
 
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(3000)
 
             # =========================
             # IPL選択
@@ -157,17 +166,15 @@ def run():
 
             print("🟢 Select IPL")
 
-            page.locator("label").filter(
-                has_text="IPL"
-            ).click()
+            page.get_by_text("IPL").click()
 
             # =========================
             # カレンダー待機
             # =========================
 
-            page.wait_for_selector("table")
+            page.wait_for_selector("table", timeout=60000)
 
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(5000)
 
             # =========================
             # 週巡回
@@ -202,7 +209,7 @@ def run():
 
                 next_btn.click()
 
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(4000)
 
         except Exception as e:
 
