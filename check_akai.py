@@ -1,11 +1,10 @@
 # =========================================================
-# Akai IPL Monitoring Script
-# Version: v1.4.0 (Full debug + stage tracing)
+# Akai IPL Monitor v1.5.0
+# Fix: MUI radio state + deterministic navigation
 # =========================================================
 
 import os
 import json
-import time
 import requests
 import redis
 
@@ -20,7 +19,7 @@ URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475/
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL_Akai")
 REDIS_URL = os.environ.get("REDIS_URL_Akai")
 
-REDIS_KEY = "akai_status_v4"
+REDIS_KEY = "akai_status_v5"
 
 # =========================
 # Redis
@@ -38,89 +37,61 @@ if REDIS_URL:
         r = None
 
 # =========================
-# Notify
+# notify
 # =========================
 
 def send(msg):
     if not WEBHOOK_URL:
         print(msg)
         return
+    requests.post(WEBHOOK_URL, json={"content": msg + "\n\u200b\n"}, timeout=10)
+
+# =========================
+# utils
+# =========================
+
+def click(page, selector, name, wait=2000):
+    loc = page.locator(selector)
+    print(f"🔎 {name} count:", loc.count())
+
+    if loc.count() == 0:
+        print(f"🟡 {name} not found")
+        return False
+
     try:
-        requests.post(WEBHOOK_URL, json={"content": msg + "\n\u200b\n"}, timeout=10)
-    except Exception as e:
-        print("Discord error:", e)
-
-# =========================
-# DEBUG helper
-# =========================
-
-def debug(page, label):
-    print(f"\n========== {label} ==========")
-    print("URL:", page.url)
-
-    html = page.content()
-    print(html[:2000])
-
-    page.screenshot(path=f"{label}.png", full_page=True)
-
-# =========================
-# safe click
-# =========================
-
-def click_if_exists(page, locator, name, wait=2000):
-    try:
-        count = locator.count()
-        print(f"🔎 {name} count:", count)
-
-        if count > 0:
-            locator.first.click(force=True)
-            print(f"🟢 {name} clicked")
-            page.wait_for_timeout(wait)
-            return True
-        else:
-            print(f"🟡 {name} not found")
-            return False
-
+        loc.first.click(force=True)
+        print(f"🟢 {name} clicked")
+        page.wait_for_timeout(wait)
+        return True
     except Exception as e:
         print(f"❌ {name} error:", e)
         return False
 
 # =========================
-# slot scan
+# calendar detection
+# =========================
+
+def is_calendar(page):
+    return (
+        page.locator("button:has-text('翌週')").count() > 0 or
+        page.locator("text=◎").count() > 0 or
+        page.locator("text=△").count() > 0
+    )
+
+# =========================
+# scan
 # =========================
 
 def scan(page):
     found = []
-
-    cells = page.locator("div, span, td")
-
-    for i in range(cells.count()):
+    for el in page.locator("div, span, td").all():
         try:
-            t = cells.nth(i).inner_text().strip()
+            t = el.inner_text().strip()
             if t in ["◎", "△"]:
                 found.append(t)
         except:
             pass
-
     return found
-
-# =========================
-# next week
-# =========================
-
-def next_week(page):
-    btn = page.locator("button:has-text('翌週')")
-
-    print("🔎 next week count:", btn.count())
-
-    if btn.count() == 0:
-        print("⛔ no next week")
-        return False
-
-    btn.first.click(force=True)
-    print("🟢 next week clicked")
-    page.wait_for_timeout(3000)
-    return True
 
 # =========================
 # main
@@ -132,89 +103,74 @@ def run():
 
     with sync_playwright() as p:
 
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox"]
-        )
-
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
 
         try:
 
-            print("🚀 v1.4.0 start")
+            print("🚀 v1.5.0 start")
 
             # =========================
             # open
             # =========================
             page.goto(URL, timeout=60000, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
-
-            debug(page, "after_goto")
+            page.wait_for_timeout(4000)
 
             # =========================
-            # 再診
+            # step 1: 再診
             # =========================
-            click_if_exists(
-                page,
-                page.locator("[data-id='operation-selection']"),
-                "再診",
-                3000
-            )
+            click(page, "[data-id='operation-selection']", "再診", 2000)
 
             # =========================
-            # 予約
+            # step 2: 予約
             # =========================
-            click_if_exists(
-                page,
-                page.locator("text=予約"),
-                "予約",
-                4000
-            )
+            click(page, "text=予約に進む", "予約に進む", 3000)
 
             # =========================
-            # カテゴリ
+            # step 3: カテゴリ（ある場合）
             # =========================
-            click_if_exists(
-                page,
-                page.locator("text=当日施術のみ"),
-                "カテゴリ",
-                2000
-            )
+            click(page, "text=当日施術のみ", "カテゴリ", 1500)
 
             # =========================
-            # IPL
+            # step 4: IPL (重要: radio state)
             # =========================
-            ipl = page.locator("text=IPL")
-            print("🔎 IPL count:", ipl.count())
+            ipl_radio = page.locator("input[data-id='menu-selection']")
 
-            if ipl.count() > 0:
-                ipl.first.click(force=True)
-                print("🟢 IPL clicked")
-                page.wait_for_timeout(2000)
+            print("🔎 IPL radio count:", ipl_radio.count())
+
+            if ipl_radio.count() > 0:
+                ipl_radio.first.check(force=True)
+                print("🟢 IPL radio checked")
             else:
-                print("❌ IPL not found")
-                debug(page, "no_ipl")
+                print("❌ IPL radio not found")
                 return
 
-            # =========================
-            # 確定
-            # =========================
-            click_if_exists(
-                page,
-                page.locator("text=確定"),
-                "確定",
-                5000
-            )
+            page.wait_for_timeout(1500)
 
             # =========================
-            # カレンダー確認
+            # step 5: 確定
             # =========================
-            debug(page, "after_confirm")
-
-            print("🔎 翌週チェック")
+            click(page, "button:has-text('メニューを確定する')", "メニュー確定", 4000)
 
             # =========================
-            # scan loop
+            # debug snapshot
+            # =========================
+            print("\n========== AFTER CONFIRM ==========")
+            print("URL:", page.url)
+
+            page.wait_for_timeout(4000)
+
+            # =========================
+            # calendar check
+            # =========================
+            if not is_calendar(page):
+                print("❌ calendar not detected")
+                page.screenshot(path="no_calendar.png", full_page=True)
+            else:
+                print("🟢 calendar detected")
+
+            # =========================
+            # scan weeks
             # =========================
             for w in range(3):
 
@@ -225,15 +181,15 @@ def run():
 
                 print("slot:", found)
 
-                if w == 2:
+                next_btn = page.locator("button:has-text('翌週')")
+                print("🔎 next week count:", next_btn.count())
+
+                if next_btn.count() == 0:
+                    print("⛔ no next week")
                     break
 
-                if not next_week(page):
-                    break
-
-        except Exception as e:
-            print("❌ ERROR:", e)
-            debug(page, "error")
+                next_btn.first.click(force=True)
+                page.wait_for_timeout(2500)
 
         finally:
             browser.close()
@@ -243,7 +199,6 @@ def run():
     # =========================
 
     all_found = list(dict.fromkeys(all_found))
-
     print("\n📦 FINAL:", all_found)
 
     # =========================
@@ -270,7 +225,7 @@ def run():
     # notify
     # =========================
 
-    msg = ["🟢 Akai IPL監視 v1.4.0"]
+    msg = ["🟢 Akai IPL監視 v1.5.0"]
 
     if not changed:
         msg.append("（前回から変更なし）")
