@@ -1,6 +1,6 @@
 # =========================================================
 # Akai IPL Monitoring Script
-# Version: v1.1.0 (State Debug + Robust Flow)
+# Version: v1.2.0 (State-driven flow / adaptive navigation)
 # =========================================================
 
 import os
@@ -32,9 +32,16 @@ r = None
 if REDIS_URL:
     try:
         url = REDIS_URL.replace("redis://", "rediss://", 1) if REDIS_URL.startswith("redis://") else REDIS_URL
-        r = redis.from_url(url, decode_responses=True, ssl_cert_reqs=None)
+
+        r = redis.from_url(
+            url,
+            decode_responses=True,
+            ssl_cert_reqs=None
+        )
+
         r.ping()
         print("✅ Redis connected")
+
     except Exception as e:
         print("❌ Redis error:", e)
         r = None
@@ -47,35 +54,14 @@ def send_discord(msg):
     if not WEBHOOK_URL:
         print(msg)
         return
+
     try:
         requests.post(WEBHOOK_URL, json={"content": msg + "\n\u200b\n"}, timeout=10)
     except Exception as e:
         print("Discord error:", e)
 
 # =========================
-# Debug dump（超重要）
-# =========================
-
-def debug_dump(page, label="debug"):
-    print(f"\n========== {label.upper()} ==========")
-    print("URL:", page.url)
-
-    try:
-        html = page.content()
-        print(html[:2000])
-    except:
-        print("content read failed")
-
-    try:
-        page.screenshot(path=f"{label}.png", full_page=True)
-        print(f"📸 screenshot saved: {label}.png")
-    except:
-        print("screenshot failed")
-
-    print("================================\n")
-
-# =========================
-# slot scan
+# Scan
 # =========================
 
 def scan_slots(page):
@@ -91,7 +77,7 @@ def scan_slots(page):
     return found
 
 # =========================
-# click next week
+# Next week
 # =========================
 
 def click_next(page):
@@ -115,100 +101,95 @@ def run():
 
     with sync_playwright() as p:
 
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox"]
+        )
+
         page = browser.new_page()
 
         try:
 
-            print("🚀 open v1.1.0")
+            print("🚀 open v1.2.0")
 
             # =========================
-            # load
+            # open
             # =========================
             page.goto(URL, timeout=60000, wait_until="domcontentloaded")
             page.wait_for_timeout(5000)
 
-            debug_dump(page, "after_goto")
+            print("URL:", page.url)
 
             # =========================
-            # 再診（存在確認型）
+            # 再診（あれば押す・なければスキップ）
             # =========================
-            print("🟢 再診チェック")
+            revisit = page.locator("[data-id='operation-selection']")
 
-            btn = page.locator("[data-id='operation-selection']")
-
-            print("再診 count:", btn.count())
-
-            if btn.count() == 0:
-                debug_dump(page, "no_revisit_button")
-                return
-
-            btn.first.click(force=True)
-
-            page.wait_for_timeout(3000)
+            if revisit.count() > 0:
+                print("🟢 再診クリック")
+                revisit.first.click(force=True)
+                page.wait_for_timeout(3000)
+            else:
+                print("🟡 再診スキップ（既にステップ進行済み）")
 
             # =========================
-            # 予約に進む
+            # 予約に進む（存在すれば）
             # =========================
-            print("🟢 予約に進む")
+            reserve_btn = page.locator("text=予約")
 
-            page.get_by_role("button", name=re.compile("予約")).first.click(force=True)
-            page.wait_for_timeout(5000)
+            if reserve_btn.count() > 0:
+                print("🟢 予約に進む")
+                reserve_btn.first.click(force=True)
+                page.wait_for_timeout(5000)
 
             # =========================
-            # カテゴリ
+            # カテゴリ（存在チェック型）
             # =========================
-            print("🟢 カテゴリ")
-
             cat = page.locator("text=当日施術のみ")
 
-            print("カテゴリ count:", cat.count())
-
-            if cat.count() == 0:
-                debug_dump(page, "no_category")
-                return
-
-            cat.first.click(force=True)
-            page.wait_for_timeout(2000)
+            if cat.count() > 0:
+                print("🟢 カテゴリ展開")
+                cat.first.click(force=True)
+                page.wait_for_timeout(2000)
+            else:
+                print("🟡 カテゴリなし")
 
             # =========================
             # IPL
             # =========================
-            print("🟢 IPL")
-
             ipl = page.locator("text=IPL")
 
-            print("IPL count:", ipl.count())
-
-            if ipl.count() == 0:
-                debug_dump(page, "no_ipl")
+            if ipl.count() > 0:
+                print("🟢 IPL選択")
+                ipl.first.click(force=True)
+                page.wait_for_timeout(2000)
+            else:
+                print("❌ IPLなし")
                 return
-
-            ipl.first.click(force=True)
-            page.wait_for_timeout(2000)
 
             # =========================
             # 確定
             # =========================
-            print("🟢 確定")
+            confirm = page.locator("text=確定")
 
-            page.get_by_role("button", name=re.compile("確定")).first.click(force=True)
+            if confirm.count() > 0:
+                print("🟢 確定")
+                confirm.first.click(force=True)
+            else:
+                print("❌ 確定ボタンなし")
+                return
 
-            # カレンダー待機（状態ベース）
             page.wait_for_timeout(6000)
 
-            debug_dump(page, "after_confirm")
-
-            # 翌週存在チェック
+            # カレンダー判定
             if page.locator("button:has-text('翌週')").count() == 0:
-                print("⛔ カレンダー未表示")
-                debug_dump(page, "no_calendar")
+                print("❌ カレンダー未表示")
                 return
 
             print("📅 カレンダーOK")
 
             # =========================
-            # scan
+            # 3週スキャン
             # =========================
             for w in range(3):
 
@@ -224,7 +205,7 @@ def run():
 
         except Exception as e:
             print("❌ Error:", e)
-            debug_dump(page, "error")
+            page.screenshot(path="error.png", full_page=True)
 
         finally:
             browser.close()
@@ -261,7 +242,7 @@ def run():
     # notify
     # =========================
 
-    msg = [f"🟢 Akai IPL監視 v1.1.0"]
+    msg = [f"🟢 Akai IPL監視 v1.2.0"]
 
     if not is_changed:
         msg.append("（前回から変更なし）")
