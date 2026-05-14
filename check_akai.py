@@ -136,13 +136,19 @@ def run():
 
         browser = p.chromium.launch(
             headless=True,
+            channel="chrome",
             args=[
                 "--no-sandbox",
-                "--disable-setuid-sandbox"
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled"
             ]
         )
 
         context = browser.new_context(
+            viewport={
+                "width": 1400,
+                "height": 1200
+            },
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -165,7 +171,16 @@ def run():
                 timeout=60000
             )
 
-            page.wait_for_timeout(7000)
+            page.wait_for_timeout(10000)
+
+            # =========================
+            # デバッグスクショ
+            # =========================
+
+            page.screenshot(
+                path="debug_before_click.png",
+                full_page=True
+            )
 
             # =========================
             # 再診
@@ -173,13 +188,17 @@ def run():
 
             print("🟢 Click 再診")
 
-            page.locator(
+            locator = page.locator(
                 '[data-id="operation-selection"]'
             ).filter(
                 has_text="再診"
-            ).first.click()
+            ).first
 
-            page.wait_for_timeout(2000)
+            print("locator count:", locator.count())
+
+            locator.click(force=True)
+
+            page.wait_for_timeout(3000)
 
             # =========================
             # 予約に進む
@@ -190,9 +209,9 @@ def run():
             page.get_by_role(
                 "button",
                 name="予約に進む"
-            ).click()
+            ).click(force=True)
 
-            page.wait_for_timeout(4000)
+            page.wait_for_timeout(5000)
 
             # =========================
             # IPL選択
@@ -200,9 +219,9 @@ def run():
 
             print("🟢 Select IPL")
 
-            page.get_by_text("IPL").click()
+            page.get_by_text("IPL").click(force=True)
 
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
 
             # =========================
             # メニューを確定
@@ -213,24 +232,18 @@ def run():
             page.get_by_role(
                 "button",
                 name="メニューを確定する"
-            ).click()
+            ).click(force=True)
 
-            page.wait_for_timeout(5000)
-
-            # =========================
-            # カレンダー待機
-            # =========================
-
-            page.wait_for_selector(
-                "table",
-                timeout=60000
-            )
-
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(7000)
 
             # =========================
             # デバッグ
             # =========================
+
+            page.screenshot(
+                path="debug_calendar.png",
+                full_page=True
+            )
 
             print("========== BODY DEBUG ==========")
 
@@ -245,6 +258,12 @@ def run():
                 print("❌ body debug error:", e)
 
             print("================================")
+
+            # =========================
+            # カレンダー待機
+            # =========================
+
+            page.wait_for_timeout(5000)
 
             # =========================
             # 3週間分取得
@@ -281,13 +300,22 @@ def run():
 
                 print("➡ click next week")
 
-                next_btn.click()
+                next_btn.click(force=True)
 
-                page.wait_for_timeout(4000)
+                page.wait_for_timeout(5000)
 
         except Exception as e:
 
             print("❌ Error:", e)
+
+            try:
+
+                page.screenshot(
+                    path="error.png",
+                    full_page=True
+                )
+            except:
+                pass
 
         finally:
 
