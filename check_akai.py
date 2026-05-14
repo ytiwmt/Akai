@@ -285,6 +285,10 @@ def run():
 
     lines.append("🟢 Akai IPL監視")
 
+    if not is_changed:
+
+        lines.append("（前回から変更なし）")
+
     if not all_found:
 
         lines.append("")
@@ -306,11 +310,6 @@ def run():
                 else:
 
                     lines.append(line)
-
-    if not is_changed:
-
-        lines.append("")
-        lines.append("（前回から変更なし）")
 
     message = "\n".join(lines)
 
