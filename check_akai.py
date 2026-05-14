@@ -1,6 +1,6 @@
 # =========================================================
 # Akai IPL Monitoring Script
-# Version: v1.3.0 (DOM resilient + robust selectors)
+# Version: v1.4.0 (Full debug + stage tracing)
 # =========================================================
 
 import os
@@ -20,7 +20,7 @@ URL = "https://reservation.medical-force.com/c/aa9268a46f2a4da29f4c98b2aee12475/
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL_Akai")
 REDIS_URL = os.environ.get("REDIS_URL_Akai")
 
-REDIS_KEY = "akai_status_v3"
+REDIS_KEY = "akai_status_v4"
 
 # =========================
 # Redis
@@ -41,7 +41,7 @@ if REDIS_URL:
 # Notify
 # =========================
 
-def send_discord(msg):
+def send(msg):
     if not WEBHOOK_URL:
         print(msg)
         return
@@ -51,69 +51,76 @@ def send_discord(msg):
         print("Discord error:", e)
 
 # =========================
-# Safe click helper
+# DEBUG helper
 # =========================
 
-def safe_click(page, locator, label, wait=2000):
+def debug(page, label):
+    print(f"\n========== {label} ==========")
+    print("URL:", page.url)
+
+    html = page.content()
+    print(html[:2000])
+
+    page.screenshot(path=f"{label}.png", full_page=True)
+
+# =========================
+# safe click
+# =========================
+
+def click_if_exists(page, locator, name, wait=2000):
     try:
-        if locator.count() > 0:
+        count = locator.count()
+        print(f"🔎 {name} count:", count)
+
+        if count > 0:
             locator.first.click(force=True)
-            print(f"🟢 {label}")
+            print(f"🟢 {name} clicked")
             page.wait_for_timeout(wait)
             return True
         else:
-            print(f"🟡 {label}なし")
+            print(f"🟡 {name} not found")
             return False
+
     except Exception as e:
-        print(f"❌ {label}失敗:", e)
+        print(f"❌ {name} error:", e)
         return False
 
 # =========================
-# slot scan (完全安全版)
+# slot scan
 # =========================
 
-def scan_slots(page):
+def scan(page):
     found = []
 
-    # DOM全体から抽出（MUI対策）
-    blocks = page.locator("div, span, td")
+    cells = page.locator("div, span, td")
 
-    count = blocks.count()
-
-    for i in range(count):
+    for i in range(cells.count()):
         try:
-            txt = blocks.nth(i).inner_text().strip()
-            if txt in ["◎", "△"]:
-                found.append(txt)
+            t = cells.nth(i).inner_text().strip()
+            if t in ["◎", "△"]:
+                found.append(t)
         except:
             pass
 
     return found
 
 # =========================
-# next week click（最強版）
+# next week
 # =========================
 
-def click_next_week(page):
-    selectors = [
-        "button:has-text('翌週')",
-        "text=翌週",
-        "role=button[name='翌週']"
-    ]
+def next_week(page):
+    btn = page.locator("button:has-text('翌週')")
 
-    for sel in selectors:
-        try:
-            loc = page.locator(sel).first
-            if loc.count() > 0:
-                loc.click(force=True)
-                print("🟢 翌週クリック")
-                page.wait_for_timeout(3000)
-                return True
-        except:
-            continue
+    print("🔎 next week count:", btn.count())
 
-    print("⛔ 翌週なし")
-    return False
+    if btn.count() == 0:
+        print("⛔ no next week")
+        return False
+
+    btn.first.click(force=True)
+    print("🟢 next week clicked")
+    page.wait_for_timeout(3000)
+    return True
 
 # =========================
 # main
@@ -134,98 +141,99 @@ def run():
 
         try:
 
-            print("🚀 v1.3.0 start")
+            print("🚀 v1.4.0 start")
 
             # =========================
             # open
             # =========================
-            page.goto(URL, timeout=60000)
+            page.goto(URL, timeout=60000, wait_until="domcontentloaded")
             page.wait_for_timeout(5000)
 
-            print("URL:", page.url)
+            debug(page, "after_goto")
 
             # =========================
-            # 再診（存在すれば押す）
+            # 再診
             # =========================
-            safe_click(
+            click_if_exists(
                 page,
                 page.locator("[data-id='operation-selection']"),
                 "再診",
-                wait=3000
+                3000
             )
 
             # =========================
             # 予約
             # =========================
-            safe_click(
+            click_if_exists(
                 page,
                 page.locator("text=予約"),
-                "予約に進む",
-                wait=4000
+                "予約",
+                4000
             )
 
             # =========================
             # カテゴリ
             # =========================
-            safe_click(
+            click_if_exists(
                 page,
                 page.locator("text=当日施術のみ"),
                 "カテゴリ",
-                wait=2000
+                2000
             )
 
             # =========================
-            # IPL（麻酔なし優先）
+            # IPL
             # =========================
-            ipl_candidates = page.locator("text=IPL")
+            ipl = page.locator("text=IPL")
+            print("🔎 IPL count:", ipl.count())
 
-            if ipl_candidates.count() > 0:
-                ipl_candidates.first.click(force=True)
-                print("🟢 IPL")
+            if ipl.count() > 0:
+                ipl.first.click(force=True)
+                print("🟢 IPL clicked")
                 page.wait_for_timeout(2000)
             else:
-                print("❌ IPLなし")
+                print("❌ IPL not found")
+                debug(page, "no_ipl")
                 return
 
             # =========================
             # 確定
             # =========================
-            safe_click(
+            click_if_exists(
                 page,
                 page.locator("text=確定"),
                 "確定",
-                wait=6000
+                5000
             )
 
             # =========================
-            # カレンダー判定（重要）
+            # カレンダー確認
             # =========================
-            page.wait_for_timeout(3000)
+            debug(page, "after_confirm")
 
-            if page.locator("button").count() == 0:
-                print("❌ UI未ロード")
-                return
-
-            print("📅 カレンダー検出")
+            print("🔎 翌週チェック")
 
             # =========================
-            # scan 3 weeks
+            # scan loop
             # =========================
             for w in range(3):
 
-                print(f"week {w}")
+                print(f"\n===== week {w} =====")
 
-                all_found.extend(scan_slots(page))
+                found = scan(page)
+                all_found.extend(found)
+
+                print("slot:", found)
 
                 if w == 2:
                     break
 
-                if not click_next_week(page):
+                if not next_week(page):
                     break
 
         except Exception as e:
-            print("❌ Error:", e)
-            page.screenshot(path="error.png", full_page=True)
+            print("❌ ERROR:", e)
+            debug(page, "error")
 
         finally:
             browser.close()
@@ -236,7 +244,7 @@ def run():
 
     all_found = list(dict.fromkeys(all_found))
 
-    print("📦 final:", len(all_found))
+    print("\n📦 FINAL:", all_found)
 
     # =========================
     # diff
@@ -247,6 +255,7 @@ def run():
     if r:
         try:
             last = r.get(REDIS_KEY)
+
             if last:
                 old = json.loads(last)
                 if set(old) == set(all_found):
@@ -255,13 +264,13 @@ def run():
             r.set(REDIS_KEY, json.dumps(all_found))
 
         except Exception as e:
-            print("❌ Redis error:", e)
+            print("Redis error:", e)
 
     # =========================
     # notify
     # =========================
 
-    msg = ["🟢 Akai IPL監視 v1.3.0"]
+    msg = ["🟢 Akai IPL監視 v1.4.0"]
 
     if not changed:
         msg.append("（前回から変更なし）")
@@ -272,7 +281,7 @@ def run():
         msg.append("")
         msg.extend("・" + x for x in all_found)
 
-    send_discord("\n".join(msg))
+    send("\n".join(msg))
 
     print("✅ done")
 
