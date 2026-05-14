@@ -28,12 +28,7 @@ if REDIS_URL:
     try:
         url = REDIS_URL.replace("redis://", "rediss://", 1) if REDIS_URL.startswith("redis://") else REDIS_URL
 
-        r = redis.from_url(
-            url,
-            decode_responses=True,
-            ssl_cert_reqs=None
-        )
-
+        r = redis.from_url(url, decode_responses=True, ssl_cert_reqs=None)
         r.ping()
         print("✅ Redis connected")
 
@@ -82,6 +77,7 @@ def click_next(page):
         print("⛔ 翌週なし")
         return False
 
+    btn.scroll_into_view_if_needed()
     btn.click(force=True)
     page.wait_for_timeout(4000)
     return True
@@ -102,16 +98,23 @@ def run():
         try:
 
             print("🚀 open")
-            page.goto(URL, timeout=60000)
+
+            # =========================
+            # ページロード（強化）
+            # =========================
+            page.goto(URL, timeout=60000, wait_until="domcontentloaded")
             page.wait_for_timeout(5000)
 
             # =========================
-            # 再診（ここは最重要・最小）
+            # 再診（ここが問題だった）
             # =========================
-            print("🟢 再診")
+            print("🟢 再診待機")
+
+            page.wait_for_selector("[data-id='operation-selection']", timeout=30000)
 
             page.locator("[data-id='operation-selection']").first.click(force=True)
-            page.wait_for_timeout(2000)
+
+            page.wait_for_timeout(3000)
 
             # =========================
             # 予約に進む
@@ -119,34 +122,45 @@ def run():
             print("🟢 予約に進む")
 
             page.get_by_role("button", name=re.compile("予約")).first.click(force=True)
+
             page.wait_for_timeout(5000)
 
             # =========================
-            # カテゴリ展開（重要）
+            # カテゴリ展開
             # =========================
-            print("🟢 カテゴリ展開")
+            print("🟢 カテゴリ")
+
+            page.wait_for_selector("text=当日施術のみ", timeout=30000)
 
             page.get_by_text("当日施術のみ").first.click(force=True)
+
             page.wait_for_timeout(2000)
 
             # =========================
-            # IPL選択
+            # IPL
             # =========================
             print("🟢 IPL")
 
+            page.wait_for_selector("text=IPL", timeout=30000)
+
             page.locator("label").filter(has_text="IPL").first.click(force=True)
+
             page.wait_for_timeout(2000)
 
             # =========================
-            # メニュー確定
+            # 確定
             # =========================
             print("🟢 確定")
 
             page.get_by_role("button", name=re.compile("確定")).first.click(force=True)
-            page.wait_for_timeout(7000)
+
+            # ★ここが重要：カレンダー待機
+            page.wait_for_selector("button:has-text('翌週')", timeout=30000)
+
+            print("📅 カレンダーOK")
 
             # =========================
-            # カレンダー確認
+            # 3週取得
             # =========================
             for w in range(3):
 
@@ -206,11 +220,9 @@ def run():
 
     if not all_found:
         msg.append("\n空きなし")
-
     else:
         msg.append("")
-        for x in all_found:
-            msg.append("・" + x)
+        msg.extend("・" + x for x in all_found)
 
     send_discord("\n".join(msg))
 
