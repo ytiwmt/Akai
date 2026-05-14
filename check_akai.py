@@ -30,13 +30,20 @@ def send(msg):
         print(msg)
 
 # -------------------------
-# 安定待ち（重要修正）
+# 安定待ち（完全分離）
 # -------------------------
 def wait_ready(page):
-    page.wait_for_selector(
-        "[data-id='operation-selection'], text=予約に進む, text=IPL",
-        timeout=30000
-    )
+    # ① DOMロード
+    page.wait_for_load_state("domcontentloaded")
+
+    # ② 再診 or 予約 or IPL のいずれかが出るまで待つ
+    page.wait_for_function("""
+        () => {
+            return document.querySelector("[data-id='operation-selection']")
+                || document.body.innerText.includes("予約に進む")
+                || document.body.innerText.includes("IPL");
+        }
+    """, timeout=30000)
 
 # -------------------------
 # click helper
@@ -61,7 +68,7 @@ def click(page, selector, name, wait=1500):
 # -------------------------
 # calendar detect
 # -------------------------
-def is_calendar(page):
+def has_calendar(page):
     return page.locator("button:has-text('翌週')").count() > 0
 
 # -------------------------
@@ -91,14 +98,13 @@ def run():
         page = browser.new_page()
 
         try:
-            print("🚀 v1.6.2 start")
+            print("🚀 v1.6.3 start")
 
             # -------------------------
             # open
             # -------------------------
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
 
-            # ★ここが修正ポイント
             wait_ready(page)
 
             # -------------------------
@@ -117,7 +123,7 @@ def run():
             click(page, "text=当日施術のみ", "カテゴリ")
 
             # -------------------------
-            # IPL（labelクリック）
+            # IPL（label固定）
             # -------------------------
             ipl = page.locator("text=IPL")
             print("🔎 IPL count:", ipl.count())
@@ -136,14 +142,14 @@ def run():
             click(page, "button:has-text('メニューを確定する')", "確定", 3000)
 
             # -------------------------
-            # カレンダー待ち（修正）
+            # カレンダー待機（CSSのみ）
             # -------------------------
             page.wait_for_selector("button:has-text('翌週')", timeout=30000)
 
             print("🟢 calendar ready")
 
             # -------------------------
-            # scan
+            # scan 3 weeks
             # -------------------------
             for w in range(3):
 
@@ -169,7 +175,7 @@ def run():
     all_found = list(dict.fromkeys(all_found))
     print("\nFINAL:", all_found)
 
-    send("🟢 Akai v1.6.2\n" + str(all_found))
+    send("🟢 Akai v1.6.3\n" + str(all_found))
 
 if __name__ == "__main__":
     run()
