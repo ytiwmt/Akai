@@ -49,30 +49,66 @@ def detect_state(page):
 
 
 # -------------------------
-# date picker
+# safe click
+# -------------------------
+def safe_click(locator, label=""):
+    try:
+        if locator.count() == 0:
+            print(f"🟡 not found: {label}")
+            return False
+
+        locator.first.click(timeout=5000, force=True)
+        print(f"🟢 clicked: {label}")
+        return True
+
+    except Exception as e:
+        print(f"❌ click failed {label}: {e}")
+        return False
+
+
+# -------------------------
+# date picker (fixed)
 # -------------------------
 def select_date_with_ok(page, date_str):
 
-    # open picker
-    page.locator("input[aria-label*='Choose date']").first.click()
-    page.wait_for_timeout(500)
+    print(f"📅 selecting: {date_str}")
 
-    # select date
+    # ① open picker（ここが重要）
+    picker = page.locator("input[aria-label*='Choose date']").first
+
+    if picker.count() == 0:
+        print("❌ date picker not found")
+        return False
+
+    try:
+        picker.click(timeout=5000, force=True)
+    except:
+        print("⚠️ picker click fallback")
+        page.locator("input").first.click(force=True)
+
+    page.wait_for_timeout(800)
+
+    # ② wait popup
+    page.wait_for_timeout(800)
+
+    # ③ select date
     target = page.locator(f"text={date_str}")
+
     if target.count() == 0:
         print(f"🟡 date not found: {date_str}")
         return False
 
     target.first.click()
-    print(f"🟢 date selected: {date_str}")
+    print("🟢 date selected")
 
-    # OK click
+    # ④ OK
     ok = page.locator("button:has-text('OK')")
+
     if ok.count() > 0:
         ok.first.click()
         print("🟢 OK clicked")
 
-    # wait render (重要)
+    # ⑤ render wait
     page.wait_for_timeout(2000)
 
     return True
@@ -82,25 +118,24 @@ def select_date_with_ok(page, date_str):
 # scan
 # -------------------------
 def scan(page):
-    res = []
+
+    results = []
 
     for el in page.locator("div, span, td").all():
         try:
             t = el.inner_text().strip()
             if t in ["◎", "△"]:
-                res.append(t)
+                results.append(t)
         except:
             pass
 
-    return res
+    return results
 
 
 # -------------------------
 # main
 # -------------------------
 def run():
-
-    all_found = []
 
     base = datetime.datetime.today()
 
@@ -110,13 +145,15 @@ def run():
         base + datetime.timedelta(days=14),
     ]
 
+    all_found = []
+
     with sync_playwright() as p:
 
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
 
         try:
-            print("🚀 v1.8.0 start")
+            print("🚀 v1.8.1 start")
 
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(2000)
@@ -125,54 +162,45 @@ def run():
             print("🧭 state:", state)
 
             # -------------------------
-            # step routing
+            # step flow
             # -------------------------
             if state == "start":
-                page.locator("[data-id='operation-selection']").first.click()
-                print("🟢 再診 clicked")
-
-                page.locator("text=予約に進む").first.click()
-                print("🟢 予約 clicked")
+                safe_click(page.locator("[data-id='operation-selection']"), "再診")
+                safe_click(page.locator("text=予約に進む"), "予約")
 
             elif state == "reserve":
-                page.locator("text=予約に進む").first.click()
-                print("🟢 reserve clicked")
+                safe_click(page.locator("text=予約に進む"), "予約")
 
-            # menu step
             if page.locator("text=メニューを確定する").count() > 0:
-                page.locator("button:has-text('メニューを確定する')").first.click()
-                print("🟢 menu confirmed")
+                safe_click(page.locator("button:has-text('メニューを確定する')"), "メニュー確定")
 
             page.wait_for_timeout(1500)
 
             # -------------------------
-            # calendar scan loop
+            # calendar loop
             # -------------------------
-            for i, d in enumerate(targets):
+            for d in targets:
 
                 date_str = d.strftime("%Y/%m/%d")
-                print(f"\n📅 target: {date_str}")
 
                 ok = select_date_with_ok(page, date_str)
                 if not ok:
                     continue
 
-                # wait calendar stable
-                page.wait_for_timeout(2000)
-
                 found = scan(page)
-                all_found.extend(found)
 
                 print("slot:", found)
 
+                all_found.extend(found)
+
             # -------------------------
-            # result
+            # final
             # -------------------------
             all_found = list(dict.fromkeys(all_found))
 
             print("\nFINAL:", all_found)
 
-            send("🟢 Akai v1.8.0\n" + str(all_found))
+            send("🟢 Akai v1.8.1\n" + str(all_found))
 
         finally:
             browser.close()
