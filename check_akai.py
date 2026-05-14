@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import time
 import requests
 import redis
 
@@ -94,13 +93,14 @@ def scan_slots(page):
 
         try:
 
-            text = row.inner_text().strip()
+            text = " ".join(
+                row.inner_text().split()
+            )
 
-            if "◎" in text:
+            # 日付行だけ抽出
+            if re.search(r"\d+/\d+", text):
 
-                cleaned = " ".join(text.split())
-
-                found.append(cleaned)
+                found.append(text)
 
         except Exception as e:
 
@@ -172,25 +172,28 @@ def run():
             # カレンダー待機
             # =========================
 
-            page.wait_for_selector("table", timeout=60000)
+            page.wait_for_selector(
+                "table",
+                timeout=60000
+            )
 
             page.wait_for_timeout(5000)
 
             # =========================
-            # 週巡回
+            # 3週間分取得
             # =========================
 
-            for week in range(8):
+            for week in range(3):
 
                 print(f"📅 week {week}")
 
                 result = scan_slots(page)
 
-                for x in result:
+                all_found.extend(result)
 
-                    all_found.append(
-                        f"[week{week}] {x}"
-                    )
+                # 最後の週は押さない
+                if week == 2:
+                    break
 
                 # =========================
                 # 翌週
@@ -220,10 +223,14 @@ def run():
             browser.close()
 
     # =========================
-    # 差分検知
+    # 重複除去（順番維持）
     # =========================
 
-    current_data = sorted(all_found)
+    all_found = list(dict.fromkeys(all_found))
+
+    # =========================
+    # 差分検知
+    # =========================
 
     is_changed = True
 
@@ -237,18 +244,38 @@ def run():
 
                 last_data = json.loads(last_raw)
 
-                if set(last_data) == set(current_data):
+                if set(last_data) == set(all_found):
 
                     is_changed = False
 
             r.set(
                 REDIS_KEY,
-                json.dumps(current_data)
+                json.dumps(all_found)
             )
 
         except Exception as e:
 
             print("❌ Redis compare error:", e)
+
+    # =========================
+    # 月別整理
+    # =========================
+
+    grouped = {}
+
+    for line in all_found:
+
+        match = re.search(r"(\d+)/", line)
+
+        if not match:
+            continue
+
+        month = int(match.group(1))
+
+        if month not in grouped:
+            grouped[month] = []
+
+        grouped[month].append(line)
 
     # =========================
     # メッセージ生成
@@ -265,11 +292,20 @@ def run():
 
     else:
 
-        lines.append("")
+        for month in sorted(grouped.keys()):
 
-        for x in all_found:
+            lines.append("")
+            lines.append(f"【{month}月】")
 
-            lines.append(f"・{x}")
+            for line in grouped[month]:
+
+                if "◎" in line:
+
+                    lines.append(f"🚨 {line}")
+
+                else:
+
+                    lines.append(line)
 
     if not is_changed:
 
