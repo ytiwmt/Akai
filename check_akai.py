@@ -29,26 +29,44 @@ def send(msg):
     else:
         print(msg)
 
+# -------------------------
+# 安定待ち（重要修正）
+# -------------------------
 def wait_ready(page):
-    # UIが完全に出るまで待つ（重要）
-    page.wait_for_function("""
-        () => {
-            const a = document.body.innerText;
-            return a.includes("IPL") || a.includes("予約に進む") || a.includes("再診");
-        }
-    """, timeout=30000)
+    page.wait_for_selector(
+        "[data-id='operation-selection'], text=予約に進む, text=IPL",
+        timeout=30000
+    )
 
-def click_first(page, selector, name):
+# -------------------------
+# click helper
+# -------------------------
+def click(page, selector, name, wait=1500):
     loc = page.locator(selector)
-    print(f"🔎 {name}: {loc.count()}")
-    if loc.count() == 0:
-        print(f"🟡 skip {name}")
-        return False
-    loc.first.click(force=True)
-    print(f"🟢 clicked {name}")
-    page.wait_for_timeout(1500)
-    return True
+    print(f"🔎 {name} count:", loc.count())
 
+    if loc.count() == 0:
+        print(f"🟡 {name} not found")
+        return False
+
+    try:
+        loc.first.click(force=True)
+        print(f"🟢 {name} clicked")
+        page.wait_for_timeout(wait)
+        return True
+    except Exception as e:
+        print(f"❌ {name} error:", e)
+        return False
+
+# -------------------------
+# calendar detect
+# -------------------------
+def is_calendar(page):
+    return page.locator("button:has-text('翌週')").count() > 0
+
+# -------------------------
+# scan
+# -------------------------
 def scan(page):
     res = []
     for el in page.locator("div, span, td").all():
@@ -60,9 +78,9 @@ def scan(page):
             pass
     return res
 
-def is_calendar(page):
-    return page.locator("button:has-text('翌週')").count() > 0
-
+# -------------------------
+# main
+# -------------------------
 def run():
 
     all_found = []
@@ -73,36 +91,36 @@ def run():
         page = browser.new_page()
 
         try:
-            print("🚀 v1.6.1 start")
+            print("🚀 v1.6.2 start")
 
             # -------------------------
             # open
             # -------------------------
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
 
-            # ★重要：JS完全待ち
+            # ★ここが修正ポイント
             wait_ready(page)
 
             # -------------------------
             # 再診
             # -------------------------
-            click_first(page, "[data-id='operation-selection']", "再診")
+            click(page, "[data-id='operation-selection']", "再診")
 
             # -------------------------
-            # 予約
+            # 予約に進む
             # -------------------------
-            click_first(page, "text=予約に進む", "予約")
+            click(page, "text=予約に進む", "予約")
 
             # -------------------------
-            # カテゴリ（存在時）
+            # カテゴリ
             # -------------------------
-            click_first(page, "text=当日施術のみ", "カテゴリ")
+            click(page, "text=当日施術のみ", "カテゴリ")
 
             # -------------------------
             # IPL（labelクリック）
             # -------------------------
             ipl = page.locator("text=IPL")
-            print("🔎 IPL:", ipl.count())
+            print("🔎 IPL count:", ipl.count())
 
             if ipl.count() == 0:
                 print("❌ IPL not found")
@@ -115,17 +133,12 @@ def run():
             # -------------------------
             # 確定
             # -------------------------
-            click_first(page, "button:has-text('メニューを確定する')", "確定")
+            click(page, "button:has-text('メニューを確定する')", "確定", 3000)
 
             # -------------------------
-            # カレンダー待機（重要）
+            # カレンダー待ち（修正）
             # -------------------------
-            page.wait_for_function("""
-                () => {
-                    return document.querySelectorAll("button").length > 0
-                        && document.body.innerText.includes("翌週");
-                }
-            """, timeout=30000)
+            page.wait_for_selector("button:has-text('翌週')", timeout=30000)
 
             print("🟢 calendar ready")
 
@@ -156,7 +169,7 @@ def run():
     all_found = list(dict.fromkeys(all_found))
     print("\nFINAL:", all_found)
 
-    send("🟢 Akai v1.6.1\n" + str(all_found))
+    send("🟢 Akai v1.6.2\n" + str(all_found))
 
 if __name__ == "__main__":
     run()
